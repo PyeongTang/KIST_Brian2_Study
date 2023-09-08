@@ -40,3 +40,5 @@ spikeMon = br.SpikeMonitor(G)
 br.run(duration/10.)
 
 plt.plot(stateMon.t/br.ms, stateMon.v[0])
+
+### 아무거나 수정좀 해봤음
