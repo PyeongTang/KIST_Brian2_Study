@@ -19,7 +19,8 @@ sigma           = .2
 spikeTH         = 'v > 1'
 resetVoltage    = 'v = 0'
 weightEquation  = 'w : 1'
-synapseWeight   = 'j*0.2'        # 뉴런의 인덱스 마다 가중치를 다르게 설정한다.
+synapseWeight   = 'j*0.2'       # 뉴런의 인덱스 마다 가중치를 다르게 설정한다.
+synapseDelay    = 'j*2*ms'      # 뉴런의 인덱스 마다 스파이크 전송 딜레이를 설정한다.
 onPreSpike      = 'v_post += w'
 
 ###############################################################################
@@ -80,6 +81,9 @@ S.connect(
 
 # 시냅스 가중치를 결정한다.
 S.w = synapseWeight
+
+# 시냅스 딜레이를 결정한다.
+S.delay = synapseDelay
 
 # 시냅스 부분을 주석 처리 하면 입력 스파이크를 받는 첫 번째 뉴런만 활성화 된다.
 
