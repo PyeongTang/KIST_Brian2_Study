@@ -9,16 +9,18 @@ br.start_scope()
 ###############################################################################
 
 # 뉴런의 수 N 선언
-N               = 2
+N               = 3
 
 # 파라미터 선언.
 timeConstant    = 10*br.ms
 v0_max          = 3.
-runDuration     = 1000*br.ms
+runDuration     = 50*br.ms
 sigma           = .2
 spikeTH         = 'v > 1'
 resetVoltage    = 'v = 0'
-onPreSpike      = 'v_post += 0.2'
+weightEquation  = 'w : 1'
+synapseWeight   = 'j*0.2'        # 뉴런의 인덱스 마다 가중치를 다르게 설정한다.
+onPreSpike      = 'v_post += w'
 
 ###############################################################################
 ############################# 뉴런 행동 모델 ###################################
@@ -52,10 +54,10 @@ G = br.NeuronGroup(
 # G.v0 = 'i * v0_max / (N-1)'
 
 # 뉴런의 시작 전류를 인덱스 마다 결정한다.
-G.I = [2, 0]
+G.I = [2, 0, 0]
 
 # 뉴런의 감쇠 상수를 뉴런 인덱스 마다 결정한다.
-G.tau = [10, 100]*br.ms
+G.tau = [10, 100, 100]*br.ms
 
 ###############################################################################
 ############################# 시냅스 설정 ######################################
@@ -65,14 +67,19 @@ G.tau = [10, 100]*br.ms
 S = br.Synapses(
     source=G            ,
     target=G            ,
+    model=weightEquation,
     on_pre=onPreSpike   ,
     )
 
+
 # 시냅스 연결을 결정한다. (i, Pre- 뉴런) (j, Post- 뉴런)
 S.connect(
-    i = 0               ,   # pre- 뉴런은 0번 인덱스의 뉴런
-    j = 1                   # post- 뉴런은 1번 인덱스의 뉴런
+    i = 0               ,
+    j = [1, 2]          
     )
+
+# 시냅스 가중치를 결정한다.
+S.w = synapseWeight
 
 # 시냅스 부분을 주석 처리 하면 입력 스파이크를 받는 첫 번째 뉴런만 활성화 된다.
 
@@ -94,7 +101,7 @@ spikeMon = br.SpikeMonitor(G)
 ############################# 시뮬레이션 실행 ###################################
 ###############################################################################
 
-br.run(runDuration/10.)
+br.run(runDuration)
 
 ###############################################################################
 ############################# Plot 출력 #######################################
@@ -102,6 +109,7 @@ br.run(runDuration/10.)
 
 plt.plot(stateMon.t/br.ms, stateMon.v[0], label='Neuron Idx : 0')
 plt.plot(stateMon.t/br.ms, stateMon.v[1], label='Neuron Idx : 1')
+plt.plot(stateMon.t/br.ms, stateMon.v[2], label='Neuron Idx : 2')
 plt.xlabel('Time (ms)')
 plt.ylabel('v')
 plt.legend()
