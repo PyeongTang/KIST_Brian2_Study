@@ -9,21 +9,16 @@ br.start_scope()
 ############################# 뉴런 파라미터 ####################################
 ###############################################################################
 
-# 뉴런의 수 N 선언
-N               = 30
-
-# 뉴런 위치 선언
-neuronSpacing   = 50*br.umeter
-spaceWidth      = (N / 4.0) * neuronSpacing
+# 가중치 파라미터
+taupre         = 20 * br.ms
+taupost        = 20 * br.ms
+wmax           = 0.01
+Apre           = 0.01
+Apost          = -Apre * (taupre / taupost) * 1.05
 
 # 파라미터 선언.
-timeConstant    = 10*br.ms
 v0_max          = 3.
-runDuration     = 50*br.ms
 sigma           = .2
-spikeTH         = 'v > 1'
-resetVoltage    = 'v = 0'
-weightEquation  = 'w : 1'
 
 
 synWeight       = 'exp(-(x_pre-x_post)**2/(2*spaceWidth**2))'
@@ -31,31 +26,41 @@ synDelay        = 'j*2*ms'      # 뉴런의 인덱스 마다 스파이크 전송
 synCondition    = 'i != j'      # 뉴런의 시냅스 연결 조건을 결정한다. (True : Fully Connect)
 synProb         = 1.           # 뉴런의 시냅스 연결 확률을 결정한다.
 
-onPreSpike      = 'v_post += w'
 
 ###############################################################################
 ############################# 뉴런 행동 모델 ###################################
 ###############################################################################
 
 # 미분 방정식 선언, 삼 따옴표 내부에 기술하고, 단위를 꼭 남겨준다.
-# 분자 / 분모의 단위 또한 중요하다. 여기선 (volt / time)
-eqs =   '''
-        dv/dt = (I - v) / tau    : 1
-        I                        : 1
-        tau                      : second
-        '''
-        
-###############################################################################
-############################# 뉴런 그룹 설정 ###################################
-###############################################################################
+# 분자 / 분모의 단위 또한 중요하다.
+
+# 뉴런의 수 
+neu_number  = 2
+
+# 뉴런 위치
+# neuronSpacing   = 50*br.umeter
+# spaceWidth      = (N / 4.0) * neuronSpacing
+
+# 뉴런 행동 모델
+neu_model     =   'v:1'
+                    
+# 스파이크 기준 전위 (Doc string 내에 존재하는 단위는 패키지 이름 X)
+neu_spikeTH =   't>(1+i)*10*ms'
+                    
+# 스파이크 직후 휴지시간
+neu_refTime =   100*br.ms
+                    
+# 스파이크 직후 막전위
+neu_rstVolt =   'v=0'
 
 # 뉴런 그룹 클래스로 뉴런 객체를 만들어준다. (초기화)
 G = br.NeuronGroup(
-    N                   ,
-    'x : meter'
-    # eqs                 ,
-    # threshold=spikeTH   ,
-    # reset=resetVoltage  ,
+    N=neu_number             ,
+    # 'x : meter'           ,
+    model=neu_model          ,
+    threshold=neu_spikeTH    ,
+    # reset=resetVoltage     ,
+    refractory=neu_refTime   ,
     # method='exact'
     )
 
@@ -72,30 +77,60 @@ G = br.NeuronGroup(
 # G.tau = [10, 100, 100]*br.ms
 
 # 뉴런의 위치를 인덱스 마다 결정한다.
-G.x = 'i * neuronSpacing'
+# G.x = 'i * neuronSpacing'
 
 ###############################################################################
 ############################# 시냅스 설정 ######################################
 ###############################################################################
 
+# 스파이크로 인한 시냅스 강도 (가중치)를 업데이트 하는 Learning rule을 설정한다.
+
+# Learning rate (apre, apost)는 지수적으로 감소한다.
+syn_weightEqs   =   '''
+                    w : 1
+                    dapre/dt = -apre/taupre : 1 (clock-driven)
+                    dapost/dt = -apost/taupost : 1 (clock-driven)
+                    '''
+
+# pre- spike가 발생했으므로 post- 뉴런의 막전위를 업데이트 한다.
+# Learning rate (apre)를 업데이트 한다 (Learning rate constant, Apre만큼).
+# Weight value (w)를 업데이트 한다 (wmax로 포화시킨다).
+syn_onPreSpike  =   '''
+                    v_post += w
+                    apre += Apre
+                    w = clip(w + apost, 0, wmax)
+                    '''
+              
+# Learning rate (apost)를 업데이트 한다 (Learning rate constant, Apost만큼).
+# Weight value (w)를 업데이트 한다 (wmax로 포화시킨다).  
+syn_onPostSpike =   '''
+                    apost += Apost
+                    w = clip(w + apre, 0, wmax)
+                    '''
+
+syn_method      =   'linear'
+
 # 시냅스 클래스로 시냅스 연결 객체를 만들어준다.
 S = br.Synapses(
-    source=G            ,
-    target=G            ,
-    model=weightEquation,
-    # on_pre=onPreSpike   ,
+    source=G                ,
+    target=G                ,
+    model=syn_weightEqs     ,
+    on_pre=syn_onPreSpike   ,
+    on_post=syn_onPostSpike ,
+    method=syn_method
     )
 
 
 # 시냅스 연결을 결정한다. (i, Pre- 뉴런) (j, Post- 뉴런)
 S.connect(
-    # j='i',
-    condition=synCondition,
-    p=synProb
+    i = 0,
+    j = 1,
+    # condition=synCondition,
+    # p=synProb
     )
 
 # 시냅스 가중치를 결정한다.
-S.w = synWeight
+# S.w = synWeight
 
 # 시냅스 딜레이를 결정한다.
 # S.delay = synDelay
@@ -107,11 +142,12 @@ S.w = synWeight
 ###############################################################################
 
 # 뉴런의 상태를 실시간으로 저장하는 모니터를 만들어준다.
-# stateMon = br.StateMonitor(
-#     G                       , # 특정 뉴런 그룹을 모니터링 한다
-#     'v'                     , # 막 전위를 저장한다.
-#     record=True
-#     )
+stateMon = br.StateMonitor(
+    S                       , # 특정 시냅스를 모니터링 한다
+    ['w', 'apre', 'apost']  , # 시냅스 내 변수들을 모니터링 한다
+    # 'v'                     , # 막 전위를 저장한다.
+    record=True
+    )
 
 # 스파이크 발생을 저장하는 모니터를 만들어준다.
 # spikeMon = br.SpikeMonitor(G)
@@ -120,16 +156,25 @@ S.w = synWeight
 ############################# 시뮬레이션 실행 ###################################
 ###############################################################################
 
-# br.run(runDuration)
+runDuration     = 30*br.ms
+
+br.run(runDuration)
 
 ###############################################################################
 ############################# Plot 출력 #######################################
 ###############################################################################
 
-plt.scatter(S.x_pre/br.um, S.x_post/br.um, S.w*20)
-plt.xlabel('Source neuron position (um)')
-plt.ylabel('Target neuron position (um)')
-plt.Text(0, 0.5, 'Target neuron position (um)')
+plt.figure(figsize=(4, 8))
+plt.subplot(211)
+plt.plot(stateMon.t/br.ms, stateMon.apre[0], label='apre')
+plt.plot(stateMon.t/br.ms, stateMon.apost[0], label='apost')
+plt.legend()
+plt.subplot(212)
+plt.plot(stateMon.t/br.ms, stateMon.w[0], label='w')
+plt.legend(loc='best')
+plt.xlabel('Time (ms)');
+plt.Text(0.5, 0, 'Time (ms)')
+
 
 ###############################################################################
 ############################# 시냅스 연결 관계 출력 #############################
