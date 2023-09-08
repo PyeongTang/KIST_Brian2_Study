@@ -1,3 +1,4 @@
+import numpy as np
 import matplotlib.pyplot as plt
 import brian2 as br
 
@@ -9,7 +10,11 @@ br.start_scope()
 ###############################################################################
 
 # 뉴런의 수 N 선언
-N               = 3
+N               = 30
+
+# 뉴런 위치 선언
+neuronSpacing   = 50*br.umeter
+spaceWidth      = (N / 4.0) * neuronSpacing
 
 # 파라미터 선언.
 timeConstant    = 10*br.ms
@@ -19,8 +24,13 @@ sigma           = .2
 spikeTH         = 'v > 1'
 resetVoltage    = 'v = 0'
 weightEquation  = 'w : 1'
-synapseWeight   = 'j*0.2'       # 뉴런의 인덱스 마다 가중치를 다르게 설정한다.
-synapseDelay    = 'j*2*ms'      # 뉴런의 인덱스 마다 스파이크 전송 딜레이를 설정한다.
+
+
+synWeight       = 'exp(-(x_pre-x_post)**2/(2*spaceWidth**2))'
+synDelay        = 'j*2*ms'      # 뉴런의 인덱스 마다 스파이크 전송 딜레이를 설정한다.
+synCondition    = 'i != j'      # 뉴런의 시냅스 연결 조건을 결정한다. (True : Fully Connect)
+synProb         = 1.           # 뉴런의 시냅스 연결 확률을 결정한다.
+
 onPreSpike      = 'v_post += w'
 
 ###############################################################################
@@ -42,10 +52,11 @@ eqs =   '''
 # 뉴런 그룹 클래스로 뉴런 객체를 만들어준다. (초기화)
 G = br.NeuronGroup(
     N                   ,
-    eqs                 ,
-    threshold=spikeTH   ,
-    reset=resetVoltage  ,
-    method='exact'
+    'x : meter'
+    # eqs                 ,
+    # threshold=spikeTH   ,
+    # reset=resetVoltage  ,
+    # method='exact'
     )
 
 # 뉴런의 시작 전압을 (0, 1)사이에서 결정한다.
@@ -55,10 +66,13 @@ G = br.NeuronGroup(
 # G.v0 = 'i * v0_max / (N-1)'
 
 # 뉴런의 시작 전류를 인덱스 마다 결정한다.
-G.I = [2, 0, 0]
+# G.I = [2, 0, 0]
 
 # 뉴런의 감쇠 상수를 뉴런 인덱스 마다 결정한다.
-G.tau = [10, 100, 100]*br.ms
+# G.tau = [10, 100, 100]*br.ms
+
+# 뉴런의 위치를 인덱스 마다 결정한다.
+G.x = 'i * neuronSpacing'
 
 ###############################################################################
 ############################# 시냅스 설정 ######################################
@@ -69,21 +83,22 @@ S = br.Synapses(
     source=G            ,
     target=G            ,
     model=weightEquation,
-    on_pre=onPreSpike   ,
+    # on_pre=onPreSpike   ,
     )
 
 
 # 시냅스 연결을 결정한다. (i, Pre- 뉴런) (j, Post- 뉴런)
 S.connect(
-    i = 0               ,
-    j = [1, 2]          
+    # j='i',
+    condition=synCondition,
+    p=synProb
     )
 
 # 시냅스 가중치를 결정한다.
-S.w = synapseWeight
+S.w = synWeight
 
 # 시냅스 딜레이를 결정한다.
-S.delay = synapseDelay
+# S.delay = synDelay
 
 # 시냅스 부분을 주석 처리 하면 입력 스파이크를 받는 첫 번째 뉴런만 활성화 된다.
 
@@ -92,28 +107,51 @@ S.delay = synapseDelay
 ###############################################################################
 
 # 뉴런의 상태를 실시간으로 저장하는 모니터를 만들어준다.
-stateMon = br.StateMonitor(
-    G                       , # 특정 뉴런 그룹을 모니터링 한다
-    'v'                     , # 막 전위를 저장한다.
-    record=True
-    )
+# stateMon = br.StateMonitor(
+#     G                       , # 특정 뉴런 그룹을 모니터링 한다
+#     'v'                     , # 막 전위를 저장한다.
+#     record=True
+#     )
 
 # 스파이크 발생을 저장하는 모니터를 만들어준다.
-spikeMon = br.SpikeMonitor(G)
+# spikeMon = br.SpikeMonitor(G)
 
 ###############################################################################
 ############################# 시뮬레이션 실행 ###################################
 ###############################################################################
 
-br.run(runDuration)
+# br.run(runDuration)
 
 ###############################################################################
 ############################# Plot 출력 #######################################
 ###############################################################################
 
-plt.plot(stateMon.t/br.ms, stateMon.v[0], label='Neuron Idx : 0')
-plt.plot(stateMon.t/br.ms, stateMon.v[1], label='Neuron Idx : 1')
-plt.plot(stateMon.t/br.ms, stateMon.v[2], label='Neuron Idx : 2')
-plt.xlabel('Time (ms)')
-plt.ylabel('v')
-plt.legend()
+plt.scatter(S.x_pre/br.um, S.x_post/br.um, S.w*20)
+plt.xlabel('Source neuron position (um)')
+plt.ylabel('Target neuron position (um)')
+plt.Text(0, 0.5, 'Target neuron position (um)')
+
+###############################################################################
+############################# 시냅스 연결 관계 출력 #############################
+###############################################################################
+def visualise_connectivity(S):
+    Ns = len(S.source)
+    Nt = len(S.target)
+    plt.figure(figsize=(10, 4))
+    plt.subplot(121)
+    plt.plot(np.zeros(Ns), np.arange(Ns), 'ok', ms=10)
+    plt.plot(np.ones(Nt), np.arange(Nt), 'ok', ms=10)
+    for i, j in zip(S.i, S.j):
+        plt.plot([0, 1], [i, j], '-k')
+    plt.xticks([0, 1], ['Source', 'Target'])
+    plt.ylabel('Neuron index')
+    plt.xlim(-0.1, 1.1)
+    plt.ylim(-1, max(Ns, Nt))
+    plt.subplot(122)
+    plt.plot(S.i, S.j, 'ok')
+    plt.xlim(-1, Ns)
+    plt.ylim(-1, Nt)
+    plt.xlabel('Source neuron index')
+    plt.ylabel('Target neuron index')
+
+# visualise_connectivity(S)
