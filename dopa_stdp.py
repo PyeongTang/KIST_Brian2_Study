@@ -5,26 +5,26 @@ import brian2 as br
 
 # 뉴런 행동 파라미터
 taum            = 10 * br.ms        # 뉴런의 막전위 감쇠상수
-Ee              = 0 * br.mV         # ??
+Ee              = 0 * br.mV         # Parameter 1 (뉴런 동작을 기술하기 위한 상수)
 vt              = -54 * br.mV       # 뉴런의 역치 전위 (Threshold Voltage)
 vr              = -60 * br.mV       # 뉴런의 안정 전위 (Resting Potential)
-El              = -74 * br.mV       # ??
+El              = -74 * br.mV       # Parameer 2 (뉴런 동작을 기술하기 위한 상수)
 taue            = 5 * br.ms         # 뉴런 컨덕턴스 감쇠상수
 
 # STDP 학습 파라미터
 taupre          = 20 * br.ms        # pre- 강화 연결 감쇠상수
 taupost         = taupre            # post- 약화 연결 감쇠상수
-gmax            = .01               # 뉴런 컨덕턴스 최대값
+gmax            = .01               # 뉴런 컨덕턴스 최대값 （가중치）
 dApre           = .01               # pre- 강화 연결 학습 변화율
 dApost          = -dApre * taupre / taupost * 1.05 # post- 약화 연결 학습 변화율
 dApost          *= gmax
 dApre           *= gmax
 
 # 도파민 파라미터
-tauc            = 1000 * br.ms      # ??
-taud            = 200 * br.ms       # 도파민 감쇠 상수
-taus            = 1 * br.ms         # 시냅스 연결강도 
-epsilon_dopa    = 5e-3              # ??
+tauc            = 1000 * br.ms      # Eligibility (도파민의 작용 때만 STDP로 반응하는 정도) constant 
+taud            = 200 * br.ms       # Extracellular dopamine constant
+taus            = 1 * br.ms         # Synaptic strength constant
+epsilon_dopa    = 5e-3              # 더해지는 상수인데 어떤 역할?? -> 2-Factor에서 3-Factor로의 변환을 더 well-working 하도록 하기 위함
 
 # 입력 자극 설정 (Spike)
 input_indices   = np.array([0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0]) # 0번 혹은 1번 인덱스의 뉴런에 스파이크 작용
@@ -52,16 +52,16 @@ neurons_monitor = br.SpikeMonitor(neurons)
 synapse         = br.Synapses(source=spike_input,
                               target=neurons,
                               model=''' s : volt ''',
-                              on_pre=''' v += s ''', # Background Spike Generator에서 발생한 Spike로 막전위 증가
+                              on_pre=''' v += s ''',  # Background Spike Generator에서 발생한 Spike로 막전위 증가
                               )
 
 # 다음을 정의하는 시냅스 연결
-# i=0 (pre- spike)와 j=0 (pre- neuron)
-# i=1 (post- spike)와 j=1 (post- neuron)
+# i=0 (pre- spike generator)와 j=0 (pre- neuron)
+# i=1 (post- spike generator)와 j=1 (post- neuron)
 synapse.connect(i = [0, 1],
                 j = [0, 1])
 
-# pre- 스파이크가 post- 뉴런에 전달하는 막전위 증가량
+# pre- 뉴런이 post- 뉴런에 전달하는 막전위 증가량
 synapse.s       = 100. * br.mV
 
 # 시냅스 연결 설정 (STDP 학습)
@@ -69,13 +69,16 @@ synapse_stdp    = br.Synapses(source=neurons,
                               target=neurons,
                               model='''
                                   mode : 1
+                                  
                                   dc / dt = -c / tauc : 1               (clock-driven)
                                   dd / dt = -d / taud : 1               (clock-driven)
                                   ds / dt = mode * c * d / taus : 1     (clock-driven)
+                                  
                                   dApre / dt = -Apre / taupre : 1       (event-driven)
                                   dApost / dt = -Apost / taupost : 1    (event-driven)
                                   ''',
-                                  # c, d, s 는 시간에 따라 지수적 감소
+                                  # clock-driven으로 Apre와 Apost를 찍어보기
+                                  # c (Eligibility), d (Dopapine), s (Strength) 는 시간에 따라 지수적 감소 (Mode=1)
                                   # Apre, Apost는 각각 on_pre와 on_post에서 증가
                               on_pre='''
                                   ge += s 
@@ -83,13 +86,14 @@ synapse_stdp    = br.Synapses(source=neurons,
                                   c = clip(c + mode * Apost, -gmax, gmax)
                                   s = clip(s + (1-mode) * Apost, -gmax, gmax)
                                   ''',
-                                  # pre- 뉴런에서 발생한 Spike로 뉴런 컨덕턴스 증가
+                                  # pre- 뉴런에서 발생한 Spike로 뉴런 컨덕턴스 (가중치) 증가
                               on_post='''
                                   Apost += dApost
                                   c = clip(c + mode * Apre, -gmax, gmax)
                                   s = clip(s + (1-mode) * Apre, -gmax, gmax)
                                   ''',
                               method='euler',
+                              # exact와 euler의 차이는 미분방정식 해결방법에 따라 다르지만 큰 차이는 없음
                               )
 
 # 다음을 정의하는 시냅스 연결
@@ -121,13 +125,14 @@ dopamine_monitor        = br.SpikeMonitor(source=dopamine)
 
 reward                  = br.Synapses(source=dopamine,
                                       target=synapse_stdp,
+                                      # 도파민은 스파이크를 시냅스에 바로 전달함
                                       model=  '''
                                               
                                               ''',
                                       on_pre= '''
                                               d_post += epsilon_dopa
                                               ''',
-                                              # ??
+                                              # d_post는 사용되지만 work에 따라 다름
                                       method= 'exact',
                                       )
 
@@ -136,7 +141,7 @@ reward                  = br.Synapses(source=dopamine,
 reward.connect()
 
 # 시뮬레이션 파라미터
-simulation_duration     = 6 * br.second
+simulation_duration = 6 * br.second
 
 # 기존 STDP
 synapse_stdp.mode = 0
