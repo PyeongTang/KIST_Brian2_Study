@@ -9,194 +9,154 @@ br.start_scope()
 ############################# 뉴런 파라미터 ####################################
 ###############################################################################
 
-# 가중치 파라미터
-taupre         = 20 * br.ms
-taupost        = 20 * br.ms
-wmax           = 0.01
-Apre           = 0.01
-Apost          = -Apre * (taupre / taupost) * 1.05
+# 뉴런 행동 파라미터
+taum            = 10 * br.ms
+Ee              = 0 * br.mV
+vt              = -54 * br.mV
+vr              = -60 * br.mV
+El              = -74 * br.mV
+taue            = 5 * br.ms
 
-# 파라미터 선언.
-v0_max          = 3.
-sigma           = .2
+# STDP 학습 파라미터
+taupre          = 20 * br.ms
+taupost         = taupre
+gmax            = .01
+dApre           = .01
+dApost          = -dApre * taupre / taupost * 1.05
+dApost          *= gmax
+dApre           *= gmax
 
+# 도파민 파라미터
+tauc            = 1000 * br.ms
+taud            = 200 * br.ms
+taus            = 1 * br.m
+epsilon_dopa    = 5e-3
 
-synWeight       = 'exp(-(x_pre-x_post)**2/(2*spaceWidth**2))'
-synDelay        = 'j*2*ms'      # 뉴런의 인덱스 마다 스파이크 전송 딜레이를 설정한다.
-synCondition    = 'i != j'      # 뉴런의 시냅스 연결 조건을 결정한다. (True : Fully Connect)
-synProb         = 1.           # 뉴런의 시냅스 연결 확률을 결정한다.
+# 입력 자극 설정 (Spike)
+input_indices   = np.array([0, 1, 0, 1 , 1, 0, 0, 1, 0, 1, 1, 0])
+input_times     = np.array([500, 550, 1000, 1010, 1500, 1510, 3500, 3550, 4000, 4010, 4500, 4510]) * br.ms
+spike_input     = br.SpikeGeneratorGroup(N=2,
+                                         indices=input_indices,
+                                         times=input_times,
+                                         )
 
+# 뉴런 설정
+neurons         = br.NeuronGroup(N=2,
+                                 model='''
+                                       dv/dt = (ge * (Ee - vr) + (El - v)) / taum  : volt
+                                       dge/dt = -ge / taue                         : 1
+                                       ''',
+                                 threshold='v > vt',
+                                 reset='v = vr',
+                                 method='exact',
+                                 )
 
-###############################################################################
-############################# 뉴런 행동 모델 ###################################
-###############################################################################
+neurons.v       = vr
+neurons_monitor = br.SpikeMonitor(neurons)
 
-# 미분 방정식 선언, 삼 따옴표 내부에 기술하고, 단위를 꼭 남겨준다.
-# 분자 / 분모의 단위 또한 중요하다.
+# 시냅스 연결 설정
+synapse         = br.Synapses(source=spike_input,
+                              target=neurons,
+                              model=''' s : volt ''',
+                              on_pre=''' v += s ''',
+                              )
 
-# 뉴런의 수 
-neu_number  = 2
+synapse.connect(i = [0, 1],
+                j = [0, 1])
 
-# 뉴런 위치
-# neuronSpacing   = 50*br.umeter
-# spaceWidth      = (N / 4.0) * neuronSpacing
+synapse.s       = 100. * br.mV
 
-# 뉴런 행동 모델
-neu_model     =   'v:1'
-                    
-# 스파이크 기준 전위 (Doc string 내에 존재하는 단위는 패키지 이름 X)
-neu_spikeTH =   't>(1+i)*10*ms'
-                    
-# 스파이크 직후 휴지시간
-neu_refTime =   100*br.ms
-                    
-# 스파이크 직후 막전위
-neu_rstVolt =   'v=0'
+# 학습 알고리즘 설정 (STDP)
+synapse_stdp    = br.Synapses(source=neurons,
+                              target=neurons,
+                              model='''
+                                  mode : 1
+                                  dc / dt = -c / tauc : 1 (clock-driven)
+                                  dd / dt = -d / taud : 1 (clock-driven)
+                                  ds / dt = mode * c * d / taus : 1 (clock-driven)
+                                  dApre / dt = -Apre / taupre : 1 (event_driven)
+                                  dApost / dt = -Apost / taupost : 1 (event_driven)
+                                  ''',
+                              on_pre='''
+                                  ge += s
+                                  Apre += dApre
+                                  c = clip(c + mode * Apost, -gmax, gmax)
+                                  s = clip(s + (1-mode) * Apost, -gmax, gmax)
+                                  ''',
+                              on_post='''
+                                  Apost += dApost
+                                  c = clip(c + mode * Apre, -gmax, gmax)
+                                  s = clip(s + (1-mode) * Apre, -gmax, gmax)
+                                  ''',
+                              method='euler',
+                              )
 
-# 뉴런 그룹 클래스로 뉴런 객체를 만들어준다. (초기화)
-G = br.NeuronGroup(
-    N=neu_number             ,
-    # 'x : meter'           ,
-    model=neu_model          ,
-    threshold=neu_spikeTH    ,
-    # reset=resetVoltage     ,
-    refractory=neu_refTime   ,
-    # method='exact'
-    )
+synapse_stdp.connect(i=0, j=0)
+synapse_stdp.mode       = 0
+synapse_stdp.s          = 1e-10
+synapse_stdp.c          = 1e-10
+synapse_stdp.d          = 0
+synapse_stdp_monitor    = br.StateMonitor(synapse_stdp, ['s', 'c', 'd'], record=[0])
 
-# 뉴런의 시작 전압을 (0, 1)사이에서 결정한다.
-# G.v = 'rand()'
+# 입력 자극 설정 (Dopamine)
+dopamine_indices        = np.array([0, 0, 0])
+dopamine_times          = np.array([3520, 4020, 4520])*br.ms
+dopamine                = br.SpikeGeneratorGroup(N=1,
+                                                 indices=dopamine_indices,
+                                                 times=dopamine_times,
+                                                 )
 
-# 뉴런의 시작 전압을 (0, v0_max) 사이에서 인덱스 마다 부여한다.
-# G.v0 = 'i * v0_max / (N-1)'
+reward                  = br.Synapses(source=dopamine,
+                                      target=synapse_stdp,
+                                      model=  '''
+                                              
+                                              ''',
+                                      on_pre= '''
+                                              d_post += eopsilon_dopa
+                                              ''',
+                                      method= 'exact',
+                                      )
 
-# 뉴런의 시작 전류를 인덱스 마다 결정한다.
-# G.I = [2, 0, 0]
+reward.connect()
 
-# 뉴런의 감쇠 상수를 뉴런 인덱스 마다 결정한다.
-# G.tau = [10, 100, 100]*br.ms
+# 시뮬레이션 파라미터
+simulation_duration     = 6 * br.second
 
-# 뉴런의 위치를 인덱스 마다 결정한다.
-# G.x = 'i * neuronSpacing'
+# 기존 STDP
+synapse_stdp.mode = 0
+br.run(duration=simulation_duration/2.)
 
-###############################################################################
-############################# 시냅스 설정 ######################################
-###############################################################################
-
-# 스파이크로 인한 시냅스 강도 (가중치)를 업데이트 하는 Learning rule을 설정한다.
-
-# Learning rate (apre, apost)는 지수적으로 감소한다.
-syn_weightEqs   =   '''
-                    w : 1
-                    dapre/dt = -apre/taupre : 1 (clock-driven)
-                    dapost/dt = -apost/taupost : 1 (clock-driven)
-                    '''
-
-# pre- spike가 발생했으므로 post- 뉴런의 막전위를 업데이트 한다.
-# Learning rate (apre)를 업데이트 한다 (Learning rate constant, Apre만큼).
-# Weight value (w)를 업데이트 한다 (wmax로 포화시킨다).
-syn_onPreSpike  =   '''
-                    v_post += w
-                    apre += Apre
-                    w = clip(w + apost, 0, wmax)
-                    '''
-              
-# Learning rate (apost)를 업데이트 한다 (Learning rate constant, Apost만큼).
-# Weight value (w)를 업데이트 한다 (wmax로 포화시킨다).  
-syn_onPostSpike =   '''
-                    apost += Apost
-                    w = clip(w + apre, 0, wmax)
-                    '''
-
-syn_method      =   'linear'
-
-# 시냅스 클래스로 시냅스 연결 객체를 만들어준다.
-S = br.Synapses(
-    source=G                ,
-    target=G                ,
-    model=syn_weightEqs     ,
-    on_pre=syn_onPreSpike   ,
-    on_post=syn_onPostSpike ,
-    method=syn_method
-    )
-
-
-# 시냅스 연결을 결정한다. (i, Pre- 뉴런) (j, Post- 뉴런)
-S.connect(
-    i = 0,
-    j = 1,
-    # condition=synCondition,
-    # p=synProb
-    )
-
-# 시냅스 가중치를 결정한다.
-# S.w = synWeight
-
-# 시냅스 딜레이를 결정한다.
-# S.delay = synDelay
-
-# 시냅스 부분을 주석 처리 하면 입력 스파이크를 받는 첫 번째 뉴런만 활성화 된다.
-
-###############################################################################
-############################# 모니터 설정 ######################################
-###############################################################################
-
-# 뉴런의 상태를 실시간으로 저장하는 모니터를 만들어준다.
-stateMon = br.StateMonitor(
-    S                       , # 특정 시냅스를 모니터링 한다
-    ['w', 'apre', 'apost']  , # 시냅스 내 변수들을 모니터링 한다
-    # 'v'                     , # 막 전위를 저장한다.
-    record=True
-    )
-
-# 스파이크 발생을 저장하는 모니터를 만들어준다.
-# spikeMon = br.SpikeMonitor(G)
-
-###############################################################################
-############################# 시뮬레이션 실행 ###################################
-###############################################################################
-
-runDuration     = 30*br.ms
-
-br.run(runDuration)
-
-###############################################################################
-############################# Plot 출력 #######################################
-###############################################################################
-
-plt.figure(figsize=(4, 8))
-plt.subplot(211)
-plt.plot(stateMon.t/br.ms, stateMon.apre[0], label='apre')
-plt.plot(stateMon.t/br.ms, stateMon.apost[0], label='apost')
-plt.legend()
-plt.subplot(212)
-plt.plot(stateMon.t/br.ms, stateMon.w[0], label='w')
-plt.legend(loc='best')
-plt.xlabel('Time (ms)');
-plt.Text(0.5, 0, 'Time (ms)')
-
-
-###############################################################################
-############################# 시냅스 연결 관계 출력 #############################
-###############################################################################
-def visualise_connectivity(S):
-    Ns = len(S.source)
-    Nt = len(S.target)
-    plt.figure(figsize=(10, 4))
-    plt.subplot(121)
-    plt.plot(np.zeros(Ns), np.arange(Ns), 'ok', ms=10)
-    plt.plot(np.ones(Nt), np.arange(Nt), 'ok', ms=10)
-    for i, j in zip(S.i, S.j):
-        plt.plot([0, 1], [i, j], '-k')
-    plt.xticks([0, 1], ['Source', 'Target'])
-    plt.ylabel('Neuron index')
-    plt.xlim(-0.1, 1.1)
-    plt.ylim(-1, max(Ns, Nt))
-    plt.subplot(122)
-    plt.plot(S.i, S.j, 'ok')
-    plt.xlim(-1, Ns)
-    plt.ylim(-1, Nt)
-    plt.xlabel('Source neuron index')
-    plt.ylabel('Target neuron index')
-
-# visualise_connectivity(S)
+# 도파민 STDP
+synapse_stdp.mode = 1
+br.run(duration=simulation_duration/2.)
+dopamine_indices, dopamine_times = dopamine_monitor.it
+neurons_indices, neurons_times = neurons_monitor.it
+plt.figure(figsize=(12, 6))
+plt.subplot(411)
+plt.plot([0.05, 2.95], [2.7, 2.7], linewidth=5, color='k')
+plt.text(1.5, 3, 'Classical STDP', horizontalalignment='center', fontsize=20)
+plt.plot([3.05, 5.95], [2.7, 2.7], linewidth=5, color='k')
+plt.text(4.5, 3, 'Dopamine modulated STDP', horizontalalignment='center', fontsize=20)
+plt.plot(neurons_times, neurons_indices, 'ob')
+plt.plot(dopamine_times, dopamine_indices + 2, 'or')
+plt.xlim([0, simulation_duration/second])
+plt.ylim([-0.5, 4])
+plt.yticks([0, 1, 2], ['Pre-neuron', 'Post-neuron', 'Reward'])
+plt.xticks([])
+plt.subplot(412)
+plt.plot(synapse_stdp_monitor.t/second, synapse_stdp_monitor.d.T/gmax, 'r-')
+plt.xlim([0, simulation_duration/second])
+plt.ylabel('Extracellular\ndopamine d(t)')
+plt.xticks([])
+plt.subplot(413)
+plt.plot(synapse_stdp_monitor.t/second, synapse_stdp_monitor.c.T/gmax, 'b-')
+plt.xlim([0, simulation_duration/second])
+plt.ylabel('Eligibility\ntrace c(t)')
+plt.xticks([])
+plt.subplot(414)
+plt.plot(synapse_stdp_monitor.t/second, synapse_stdp_monitor.s.T/gmax, 'g-')
+plt.xlim([0, simulation_duration/second])
+plt.ylabel('Synaptic\nstrength s(t)')
+plt.xlabel('Time (s)')
+plt.tight_layout()
+plt.show()
