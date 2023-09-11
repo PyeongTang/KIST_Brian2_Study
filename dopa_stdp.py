@@ -47,6 +47,10 @@ neurons         = br.NeuronGroup(N=2,
 
 neurons.v       = vr
 neurons_monitor = br.SpikeMonitor(neurons)
+neurons_stateMon= br.StateMonitor(source=neurons,
+                                  variables='v',
+                                  record=True
+                                  )
 
 # 시냅스 연결 설정 (pre- 뉴런으로 인한 post- 뉴런의 막전위 증가 정의)
 synapse         = br.Synapses(source=spike_input,
@@ -74,8 +78,8 @@ synapse_stdp    = br.Synapses(source=neurons,
                                   dd / dt = -d / taud : 1               (clock-driven)
                                   ds / dt = mode * c * d / taus : 1     (clock-driven)
                                   
-                                  dApre / dt = -Apre / taupre : 1       (event-driven)
-                                  dApost / dt = -Apost / taupost : 1    (event-driven)
+                                  dApre / dt = -Apre / taupre : 1       (clock-driven)
+                                  dApost / dt = -Apost / taupost : 1    (clock-driven)
                                   ''',
                                   # clock-driven으로 Apre와 Apost를 찍어보기
                                   # c (Eligibility), d (Dopapine), s (Strength) 는 시간에 따라 지수적 감소 (Mode=1)
@@ -110,7 +114,7 @@ synapse_stdp.c          = 1e-10
 # 외부 도파민 자극강도 (Extracellular dopamine, d(t))
 synapse_stdp.d          = 0
 
-synapse_stdp_monitor    = br.StateMonitor(synapse_stdp, ['s', 'c', 'd'], record=[0])
+synapse_stdp_monitor    = br.StateMonitor(synapse_stdp, ['s', 'c', 'd', 'Apre', 'Apost'], record=[0])
 
 # 입력 자극 설정 (Dopamine)
 dopamine_indices        = np.array([0, 0, 0])
@@ -154,8 +158,8 @@ br.run(duration=simulation_duration/2)
 # 출력
 dopamine_indices, dopamine_times = dopamine_monitor.it
 neurons_indices, neurons_times = neurons_monitor.it
-plt.figure(figsize=(12, 6))
-plt.subplot(411)
+plt.figure(figsize=(12, 12))
+plt.subplot(611)
 plt.plot([0.05, 2.95], [2.7, 2.7], linewidth=5, color='k')
 plt.text(1.5, 3, 'Classical STDP', horizontalalignment='center', fontsize=20)
 plt.plot([3.05, 5.95], [2.7, 2.7], linewidth=5, color='k')
@@ -166,28 +170,56 @@ plt.xlim([0, simulation_duration/br.second])
 plt.ylim([-0.5, 4])
 plt.yticks([0, 1, 2], ['Pre-neuron', 'Post-neuron', 'Reward'])
 plt.xticks([])
-plt.subplot(412)
+plt.subplot(612)
 plt.plot(synapse_stdp_monitor.t/br.second, synapse_stdp_monitor.d.T/gmax, 'r-')
 plt.xlim([0, simulation_duration/br.second])
 plt.ylabel('Extracellular\ndopamine d(t)')
 plt.xticks([])
-plt.subplot(413)
+plt.subplot(613)
 plt.plot(synapse_stdp_monitor.t/br.second, synapse_stdp_monitor.c.T/gmax, 'b-')
 plt.xlim([0, simulation_duration/br.second])
 plt.ylabel('Eligibility\ntrace c(t)')
 plt.xticks([])
-plt.subplot(414)
+plt.subplot(614)
 plt.plot(synapse_stdp_monitor.t/br.second, synapse_stdp_monitor.s.T/gmax, 'g-')
 plt.xlim([0, simulation_duration/br.second])
 plt.ylabel('Synaptic\nstrength s(t)')
-plt.xlabel('Time (s)')
 plt.tight_layout()
-plt.show()
+
+# A Trace of Pre- Neuron
+plt.subplot(615)
+plt.plot(synapse_stdp_monitor.t/br.second, synapse_stdp_monitor.Apre.T/gmax, 'y-')
+plt.xlim([0, (simulation_duration/br.second)])
+plt.ylabel('Strengthening\nrate (Apre)')
+plt.tight_layout()
+
+# A Trace of Post- Neuron
+plt.subplot(616)
+plt.plot(synapse_stdp_monitor.t/br.second, synapse_stdp_monitor.Apost.T/gmax, 'k-')
+plt.xlim([0, (simulation_duration/br.second)])
+plt.ylabel('Weakening\nrate (Apost)')
+plt.tight_layout()
+
+# # V Trace of Pre- Neuron
+# plt.subplot(817)
+# plt.plot(neurons_stateMon.t/br.second, neurons_stateMon.v[0]/gmax, 'y-')
+# plt.xlim([0, (simulation_duration/br.second)])
+# plt.ylabel('Membrane Potential\nof Pre- Neuron (volt)')
+# plt.tight_layout()
+
+# # V Trace of Post- Neuron
+# plt.subplot(818)
+# plt.plot(neurons_stateMon.t/br.second, neurons_stateMon.v[1]/gmax, 'k-')
+# plt.xlim([0, (simulation_duration/br.second)])
+# plt.ylabel('Membrane Potential\nof Post- Neuron (volt)')
+# plt.xlabel('Time (s)')
+# plt.tight_layout()
+# plt.show()
 
 def visualise_connectivity(S):
     Ns = len(S.source)
     Nt = len(S.target)
-    plt.figure(figsize=(10, 4))
+    plt.figure(figsize=(14, 4))
     plt.subplot(121)
     plt.plot(np.zeros(Ns), np.arange(Ns), 'ok', ms=10)
     plt.plot(np.ones(Nt), np.arange(Nt), 'ok', ms=10)
@@ -208,6 +240,6 @@ def visualise_connectivity(S):
     # synapse       = spike_input   <-> neurons
     # synapse_stdp  = neurons       <-> neurons
     # reward        = dopamine      <-> synapse_stdp
-visualise_connectivity(synapse)
-visualise_connectivity(synapse_stdp)
-visualise_connectivity(reward)
+# visualise_connectivity(synapse)
+# visualise_connectivity(synapse_stdp)
+# visualise_connectivity(reward)
